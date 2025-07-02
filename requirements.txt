@@ -1,0 +1,6 @@
+streamlit
+pandas
+jdatetime
+openpyxl
+gspread
+oauth2client
