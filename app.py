@@ -18,7 +18,7 @@ credentials = Credentials.from_service_account_info(credentials_dict, scopes=sco
 
 # اتصال به Google Sheets
 gc = gspread.authorize(credentials)
-worksheet = gc.open("Activity_Tracker_Data").worksheet("Sheet1")
+worksheet = gc.open("activity-tracker-data").worksheet("Sheet1")
 
 # دریافت داده‌ها از شیت و تبدیل به DataFrame
 data = worksheet.get_all_records()
