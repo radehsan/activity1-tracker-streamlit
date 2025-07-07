@@ -13,7 +13,7 @@ credentials_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 credentials = Credentials.from_service_account_info(credentials_dict, scopes=scope)
 gc = gspread.authorize(credentials)
-worksheet = gc.open("Activity_Tracker_Data").worksheet("Sheet1")
+worksheet = gc.open("activity-tracker-data").worksheet("Sheet1")
 data = worksheet.get_all_records()
 df = pd.DataFrame(data)
 
