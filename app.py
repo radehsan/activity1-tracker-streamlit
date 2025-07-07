@@ -1,3 +1,13 @@
+if "username" not in st.session_state:
+    st.session_state.username = ""
+
+if not st.session_state.username:
+    st.session_state.username = st.text_input("👤 Please enter your name to continue:", key="username_input")
+    if not st.session_state.username:
+        st.stop()
+
+user = st.session_state.username
+st.write(f"👋 Welcome, **{user}**")
 import streamlit as st
 import pandas as pd
 import jdatetime
