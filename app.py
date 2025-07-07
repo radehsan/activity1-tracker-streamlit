@@ -43,7 +43,7 @@ for i, row in filtered_df.iterrows():
     cols[0].write(f"**{row['Activity Title']}**")
     if cols[1].button("✏️ Edit", key=f"edit_{i}"):
         st.session_state.selected_index = i
-        st.experimental_rerun()  # <-- اینجا اصلاح می‌کنیم به st.rerun()
+        st.rerun()  # <-- اینجا اصلاح می‌کنیم به st.rerun()
 
 if selected_index is not None:
     selected_row = filtered_df.loc[selected_index]
