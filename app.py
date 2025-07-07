@@ -1,74 +1,85 @@
 import streamlit as st
 import pandas as pd
-import jdatetime
-import datetime
-import os
-import json
 import gspread
 from google.oauth2.service_account import Credentials
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+import jdatetime
+import datetime
 
-# اتصال به Google Sheets
-credentials_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-credentials = Credentials.from_service_account_info(credentials_dict, scopes=scope)
+# تنظیمات Google Sheets
+scopes = ['https://www.googleapis.com/auth/spreadsheets',
+          'https://www.googleapis.com/auth/drive']
+
+credentials = Credentials.from_service_account_info(
+    st.secrets["google_credentials"], scopes=scopes)
 gc = gspread.authorize(credentials)
-worksheet = gc.open("Activity_Tracker_Data").worksheet("Sheet1")
+
+spreadsheet = gc.open("Activity_tracker_Data")
+worksheet = spreadsheet.worksheet("Sheet1")
+
+# خواندن داده‌ها و تبدیل به DataFrame
 data = worksheet.get_all_records()
 df = pd.DataFrame(data)
-st.set_page_config(page_title="Activity Tracker", layout="wide")
-DATE_FORMAT = "%Y/%m/%d"
 
-# دریافت نام کاربر (فقط یکبار)
-if "username" not in st.session_state:
-    st.session_state.username = ""
+# تبدیل ستون تاریخ به datetime و مدیریت مقادیر خالی
+for col in ["Start Date", "End Date"]:
+    if col in df.columns:
+        df[col] = pd.to_datetime(df[col], errors='coerce')
 
-if not st.session_state.username:
-    st.session_state.username = st.text_input("👤 Please enter your name to continue:", key="username_input")
-    if not st.session_state.username:
-        st.stop()
+# پر کردن ستون‌های احتمالا خالی
+for col in ["Status", "Plan"]:
+    if col in df.columns:
+        df[col] = df[col].fillna("")
 
-user = st.session_state.username
-st.write(f"👋 Welcome, **{user}**")
+if "Duration (days)" in df.columns:
+    df["Duration (days)"] = pd.to_numeric(df["Duration (days)"], errors='coerce').fillna(0).astype(int)
 
-discipline = st.selectbox("Select your discipline", sorted(df["Discipline"].dropna().unique()))
-filtered_df = df[df["Discipline"] == discipline].reset_index()
+if "Physical Progress" in df.columns:
+    df["Physical Progress"] = pd.to_numeric(df["Physical Progress"], errors='coerce').fillna(0).astype(int)
 
-st.markdown("### 🖱 Click the button to edit a row")
+# افزودن ستون Edit به ابتدای df
+df.insert(0, "Edit", "✏️")
 
-selected_index = st.session_state.get("selected_index", None)
+# آماده‌سازی AgGrid
+gb = GridOptionsBuilder.from_dataframe(df)
+gb.configure_selection('single')
+gb.configure_column("Edit", editable=False, cellRenderer='''function(params) {
+    return '<button class="btn-edit" data-row="'+params.rowIndex+'">Edit</button>'
+}''', width=80)
+grid_options = gb.build()
 
-# نمایش جدول
-for i, row in filtered_df.iterrows():
-    cols = st.columns([6,1])
-    cols[0].write(f"**{row['Activity Title']}**")
-    if cols[1].button("✏️ Edit", key=f"edit_{i}"):
-        st.session_state.selected_index = i
-        st.rerun()  # <-- اینجا اصلاح می‌کنیم به st.rerun()
+st.write(f"👋 Welcome, {st.session_state.get('username', 'User')}")
 
-if selected_index is not None:
-    selected_row = filtered_df.loc[selected_index]
-    real_index = selected_row["index"]
+grid_response = AgGrid(
+    df,
+    gridOptions=grid_options,
+    update_mode=GridUpdateMode.NO_UPDATE,
+    allow_unsafe_jscode=True,
+    theme='balham',
+    fit_columns_on_grid_load=True,
+)
+
+selected_rows = grid_response['selected_rows']
+if selected_rows:
+    selected_row = selected_rows[0]
+    row_index = selected_row['_selectedRowNodeInfo']['nodeRowIndex']
 
     with st.form("edit_form"):
         st.markdown("### ✏️ Edit Activity")
 
-        # تاریخ شروع و پایان پیش‌فرض با چک خالی بودن
-        try:
-            start_date_default = pd.to_datetime(selected_row["Start Date"])
-        except Exception:
-            start_date_default = datetime.date.today()
-        try:
-            end_date_default = pd.to_datetime(selected_row["End Date"])
-        except Exception:
-            end_date_default = datetime.date.today()
+        today_shamsi = jdatetime.date.today()
+        today_greg = today_shamsi.togregorian()
 
-        start_date_greg = st.date_input("📅 Start Date (Gregorian)", start_date_default)
-        end_date_greg = st.date_input("📅 End Date (Gregorian)", end_date_default)
+        start_date_default = selected_row["Start Date"] if pd.notna(selected_row["Start Date"]) else today_greg
+        end_date_default = selected_row["End Date"] if pd.notna(selected_row["End Date"]) else today_greg
+
+        start_date_greg = st.date_input("📅 Start Date (Shamsi)", start_date_default)
+        end_date_greg = st.date_input("📅 End Date (Shamsi)", end_date_default)
 
         start_date_shamsi = jdatetime.date.fromgregorian(date=start_date_greg)
         end_date_shamsi = jdatetime.date.fromgregorian(date=end_date_greg)
-        st.write("📆 Selected Start (Shamsi):", start_date_shamsi.strftime(DATE_FORMAT))
-        st.write("📆 Selected End (Shamsi):", end_date_shamsi.strftime(DATE_FORMAT))
+        st.write("📆 Selected Start (Shamsi):", start_date_shamsi.strftime("%Y/%m/%d"))
+        st.write("📆 Selected End (Shamsi):", end_date_shamsi.strftime("%Y/%m/%d"))
 
         duration = (end_date_greg - start_date_greg).days
         st.write("📏 Duration (days):", duration)
@@ -80,14 +91,16 @@ if selected_index is not None:
             "Rejected",
             "Finished"
         ]
-        current_status = selected_row.get("Status", "") or ""
-        default_index = status_options.index(current_status) if current_status in status_options else 0
+        current_status = selected_row["Status"]
+        if pd.isna(current_status) or current_status not in status_options:
+            default_index = status_options.index("Approved")
+        else:
+            default_index = status_options.index(current_status)
+
         new_status = st.selectbox("🔄 New Status", status_options, index=default_index)
 
-        old_progress = selected_row.get("Physical Progress", 0)
-        try:
-            old_progress = int(old_progress)
-        except:
+        old_progress = selected_row["Physical Progress"]
+        if pd.isna(old_progress):
             old_progress = 0
 
         if new_status == "":
@@ -99,35 +112,30 @@ if selected_index is not None:
         elif new_status == "Finished":
             new_progress = 100
         elif new_status == "Rejected":
-            new_progress = old_progress
+            new_progress = int(old_progress)
         else:
-            new_progress = old_progress
+            new_progress = int(old_progress)
 
         st.write(f"📈 Calculated Physical Progress: **{new_progress}%**")
 
-        current_plan = selected_row.get("Plan", "") or ""
+        current_plan = selected_row["Plan"] if "Plan" in selected_row and pd.notna(selected_row["Plan"]) else ""
         new_plan = st.text_area("📝 Plan / Notes", value=current_plan)
 
         submitted = st.form_submit_button("✅ Save Changes")
+
         if submitted:
-            try:
-                df.at[real_index, "Start Date"] = start_date_greg.strftime("%Y-%m-%d")
-                df.at[real_index, "End Date"] = end_date_greg.strftime("%Y-%m-%d")
-                df.at[real_index, "Duration (days)"] = duration
-                df.at[real_index, "Status"] = new_status
-                df.at[real_index, "Physical Progress"] = new_progress
-                df.at[real_index, "Plan"] = new_plan
-                df.at[real_index, "Last Edited"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            df.at[row_index, "Start Date"] = start_date_greg.strftime("%Y-%m-%d")
+            df.at[row_index, "End Date"] = end_date_greg.strftime("%Y-%m-%d")
+            df.at[row_index, "Duration (days)"] = duration
+            df.at[row_index, "Status"] = new_status
+            df.at[row_index, "Physical Progress"] = new_progress
+            df.at[row_index, "Plan"] = new_plan
 
-                updated_row = df.loc[real_index].astype(str).tolist()
-                col_count = len(df.columns)
-                end_col_letter = chr(65 + col_count - 1)
-                worksheet.update(f'A{real_index + 2}:{end_col_letter}{real_index + 2}', [updated_row])
+            # آپدیت گوگل شیت
+            rows_to_save = [df.columns.tolist()] + df.fillna("").astype(str).values.tolist()
+            worksheet.clear()
+            worksheet.update(rows_to_save)
 
-                st.success("✅ Row updated successfully!")
-                st.session_state.selected_index = None
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Failed to update Google Sheet: {e}")
-
+            st.success("✅ Updated successfully!")
+            st.rerun()
 
