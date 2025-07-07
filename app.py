@@ -3,32 +3,25 @@ import pandas as pd
 import jdatetime
 import datetime
 import os
+import getpass
 import json
 import gspread
 from google.oauth2.service_account import Credentials
 
-# بارگذاری اعتبارنامه از متغیر محیطی (یا می‌تونی مستقیم فایل بخونی)
-credentials_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
-
-# تعیین دسترسی‌ها
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-
-# ساخت Credentials و احراز هویت
-credentials = Credentials.from_service_account_info(credentials_dict, scopes=scope)
-
 # اتصال به Google Sheets
+credentials_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+credentials = Credentials.from_service_account_info(credentials_dict, scopes=scope)
 gc = gspread.authorize(credentials)
-worksheet = gc.open("activity-tracker-data").worksheet("Sheet1")
-
-# دریافت داده‌ها از شیت و تبدیل به DataFrame
+worksheet = gc.open("Activity_Tracker_Data").worksheet("Sheet1")
 data = worksheet.get_all_records()
 df = pd.DataFrame(data)
 
-# تنظیمات استریم‌لیت
+# پیکربندی صفحه
 st.set_page_config(page_title="Activity Tracker", layout="wide")
 DATE_FORMAT = "%Y/%m/%d"
 
-# دریافت نام کاربر
+# دریافت نام کاربر (فقط یکبار)
 if "username" not in st.session_state:
     st.session_state.username = ""
 
@@ -46,7 +39,7 @@ filtered_df = df[df["Discipline"] == discipline].reset_index()
 
 st.markdown("### 🖱 Click a row to edit")
 
-# نمایش جدول و انتخاب ردیف جهت ویرایش
+# جدول انتخاب سطر
 edited_df = st.data_editor(
     filtered_df,
     use_container_width=True,
@@ -58,7 +51,7 @@ edited_df = st.data_editor(
 
 selected_index = st.session_state.get("selected_index")
 
-# دکمه ویرایش برای هر ردیف
+# دکمه ویرایش هر ردیف
 for i in range(len(filtered_df)):
     if st.button(f"✏️ Edit row {i+1}", key=f"edit_button_{i}"):
         selected_index = i
@@ -67,7 +60,7 @@ for i in range(len(filtered_df)):
 
 if selected_index is not None:
     selected_row = filtered_df.loc[selected_index]
-    real_index = selected_row["index"]
+    real_index = selected_row["index"]  # ایندکس واقعی در df اصلی
 
     with st.form("edit_form"):
         st.markdown("### ✏️ Edit Activity")
@@ -75,8 +68,19 @@ if selected_index is not None:
         today_shamsi = jdatetime.date.today()
         today_greg = today_shamsi.togregorian()
 
-        start_date_default = pd.to_datetime(selected_row["Start Date"]) if pd.notna(selected_row["Start Date"]) else today_greg
-        end_date_default = pd.to_datetime(selected_row["End Date"]) if pd.notna(selected_row["End Date"]) else today_greg
+        try:
+            start_date_default = pd.to_datetime(selected_row["Start Date"])
+            if pd.isna(start_date_default):
+                start_date_default = today_greg
+        except:
+            start_date_default = today_greg
+
+        try:
+            end_date_default = pd.to_datetime(selected_row["End Date"])
+            if pd.isna(end_date_default):
+                end_date_default = today_greg
+        except:
+            end_date_default = today_greg
 
         start_date_greg = st.date_input("📅 Start Date (Shamsi)", start_date_default)
         end_date_greg = st.date_input("📅 End Date (Shamsi)", end_date_default)
@@ -125,7 +129,6 @@ if selected_index is not None:
         submitted = st.form_submit_button("✅ Save Changes")
         if submitted:
             try:
-                # بروزرسانی در DataFrame
                 df.at[real_index, "Start Date"] = start_date_greg
                 df.at[real_index, "End Date"] = end_date_greg
                 df.at[real_index, "Duration (days)"] = duration
@@ -134,10 +137,9 @@ if selected_index is not None:
                 df.at[real_index, "Plan"] = new_plan
                 df.at[real_index, "Last Edited"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                # آپدیت ردیف مربوطه در Google Sheets
                 updated_row = df.loc[real_index].astype(str).tolist()
                 col_count = len(df.columns)
-                end_col_letter = chr(65 + col_count - 1)  # فرض شده ستون‌ها تا Z باشند
+                end_col_letter = chr(65 + col_count - 1)
                 worksheet.update(f'A{real_index + 2}:{end_col_letter}{real_index + 2}', [updated_row])
 
                 st.success("✅ Row updated successfully!")
