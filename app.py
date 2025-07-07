@@ -12,11 +12,9 @@ credentials_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 credentials = Credentials.from_service_account_info(credentials_dict, scopes=scope)
 gc = gspread.authorize(credentials)
-worksheet = gc.open("Activity-Tracker-Data").worksheet("Sheet1")
+worksheet = gc.open("Activity_Tracker_Data").worksheet("Sheet1")
 data = worksheet.get_all_records()
 df = pd.DataFrame(data)
-
-# پیکربندی صفحه
 st.set_page_config(page_title="Activity Tracker", layout="wide")
 DATE_FORMAT = "%Y/%m/%d"
 
@@ -32,51 +30,37 @@ if not st.session_state.username:
 user = st.session_state.username
 st.write(f"👋 Welcome, **{user}**")
 
-# فیلتر بر اساس دیسیپلین
 discipline = st.selectbox("Select your discipline", sorted(df["Discipline"].dropna().unique()))
 filtered_df = df[df["Discipline"] == discipline].reset_index()
 
-st.markdown("### 🖱 Click '✏️ Edit' to edit an activity")
+st.markdown("### 🖱 Click the button to edit a row")
 
 selected_index = st.session_state.get("selected_index", None)
 
-# نمایش جدول با دکمه ویرایش کنار هر ردیف
-for i in range(len(filtered_df)):
-    row = filtered_df.loc[i]
-    cols = st.columns([8, 1])
-    with cols[0]:
-        st.markdown(f"**Activity {i+1}:** {row.get('Activity Title', '')}")
-        st.markdown(f"📅 Start Date: {row.get('Start Date', '')} | End Date: {row.get('End Date', '')}")
-        st.markdown(f"📊 Status: {row.get('Status', '')} | Progress: {row.get('Physical Progress', '')}%")
-        st.markdown(f"📝 Plan / Notes: {row.get('Plan', '')}")
-    with cols[1]:
-        if st.button("✏️ Edit", key=f"edit_button_{i}"):
-            selected_index = i
-            st.session_state["selected_index"] = i
-            st.experimental_rerun()
+# نمایش جدول
+for i, row in filtered_df.iterrows():
+    cols = st.columns([6,1])
+    cols[0].write(f"**{row['Activity Title']}**")
+    if cols[1].button("✏️ Edit", key=f"edit_{i}"):
+        st.session_state.selected_index = i
+        st.experimental_rerun()  # <-- اینجا اصلاح می‌کنیم به st.rerun()
 
-# اگر ردیفی انتخاب شده بود، فرم ویرایش نمایش داده شود
-if selected_index is not None and selected_index < len(filtered_df):
+if selected_index is not None:
     selected_row = filtered_df.loc[selected_index]
-    real_index = selected_row["index"]  # ایندکس اصلی در df
+    real_index = selected_row["index"]
 
     with st.form("edit_form"):
         st.markdown("### ✏️ Edit Activity")
 
-        # بررسی و مقداردهی پیش‌فرض تاریخ‌ها، در صورت خالی بودن مقدار امروز قرار می‌گیرد
-        today_shamsi = jdatetime.date.today()
-        today_greg = today_shamsi.togregorian()
-
-        def safe_to_datetime(val):
-            if pd.isna(val) or val == "":
-                return today_greg
-            try:
-                return pd.to_datetime(val)
-            except:
-                return today_greg
-
-        start_date_default = safe_to_datetime(selected_row.get("Start Date", ""))
-        end_date_default = safe_to_datetime(selected_row.get("End Date", ""))
+        # تاریخ شروع و پایان پیش‌فرض با چک خالی بودن
+        try:
+            start_date_default = pd.to_datetime(selected_row["Start Date"])
+        except Exception:
+            start_date_default = datetime.date.today()
+        try:
+            end_date_default = pd.to_datetime(selected_row["End Date"])
+        except Exception:
+            end_date_default = datetime.date.today()
 
         start_date_greg = st.date_input("📅 Start Date (Gregorian)", start_date_default)
         end_date_greg = st.date_input("📅 End Date (Gregorian)", end_date_default)
@@ -87,9 +71,6 @@ if selected_index is not None and selected_index < len(filtered_df):
         st.write("📆 Selected End (Shamsi):", end_date_shamsi.strftime(DATE_FORMAT))
 
         duration = (end_date_greg - start_date_greg).days
-        if duration < 0:
-            st.error("❌ End Date cannot be before Start Date.")
-            duration = 0
         st.write("📏 Duration (days):", duration)
 
         status_options = [
@@ -99,15 +80,15 @@ if selected_index is not None and selected_index < len(filtered_df):
             "Rejected",
             "Finished"
         ]
-        current_status = selected_row.get("Status", "")
+        current_status = selected_row.get("Status", "") or ""
         default_index = status_options.index(current_status) if current_status in status_options else 0
         new_status = st.selectbox("🔄 New Status", status_options, index=default_index)
 
         old_progress = selected_row.get("Physical Progress", 0)
         try:
-            old_progress_int = int(old_progress)
+            old_progress = int(old_progress)
         except:
-            old_progress_int = 0
+            old_progress = 0
 
         if new_status == "":
             new_progress = 0
@@ -118,19 +99,18 @@ if selected_index is not None and selected_index < len(filtered_df):
         elif new_status == "Finished":
             new_progress = 100
         elif new_status == "Rejected":
-            new_progress = old_progress_int
+            new_progress = old_progress
         else:
-            new_progress = old_progress_int
+            new_progress = old_progress
 
         st.write(f"📈 Calculated Physical Progress: **{new_progress}%**")
 
-        current_plan = selected_row.get("Plan", "")
+        current_plan = selected_row.get("Plan", "") or ""
         new_plan = st.text_area("📝 Plan / Notes", value=current_plan)
 
         submitted = st.form_submit_button("✅ Save Changes")
         if submitted:
             try:
-                # به‌روزرسانی داده‌ها در DataFrame اصلی
                 df.at[real_index, "Start Date"] = start_date_greg.strftime("%Y-%m-%d")
                 df.at[real_index, "End Date"] = end_date_greg.strftime("%Y-%m-%d")
                 df.at[real_index, "Duration (days)"] = duration
@@ -139,16 +119,15 @@ if selected_index is not None and selected_index < len(filtered_df):
                 df.at[real_index, "Plan"] = new_plan
                 df.at[real_index, "Last Edited"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                # آماده‌سازی داده‌ها برای آپدیت سطر در Google Sheets
                 updated_row = df.loc[real_index].astype(str).tolist()
                 col_count = len(df.columns)
-                end_col_letter = chr(65 + col_count - 1)  # تا ستون Z فرض شده
+                end_col_letter = chr(65 + col_count - 1)
                 worksheet.update(f'A{real_index + 2}:{end_col_letter}{real_index + 2}', [updated_row])
 
                 st.success("✅ Row updated successfully!")
-                # پاک کردن انتخاب بعد از ذخیره
-                del st.session_state["selected_index"]
-                st.experimental_rerun()
+                st.session_state.selected_index = None
+                st.rerun()
             except Exception as e:
                 st.error(f"❌ Failed to update Google Sheet: {e}")
+
 
