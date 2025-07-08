@@ -4,9 +4,10 @@ import gspread
 from google.oauth2.service_account import Credentials
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 import jdatetime
-import datetime
+import json
 
-# تنظیمات Google Sheets
+st.json(st.secrets["google_credentials"])
+
 scopes = ['https://www.googleapis.com/auth/spreadsheets',
           'https://www.googleapis.com/auth/drive']
 
@@ -17,16 +18,13 @@ gc = gspread.authorize(credentials)
 spreadsheet = gc.open("Activity_tracker_Data")
 worksheet = spreadsheet.worksheet("Sheet1")
 
-# خواندن داده‌ها و تبدیل به DataFrame
 data = worksheet.get_all_records()
 df = pd.DataFrame(data)
 
-# تبدیل ستون تاریخ به datetime و مدیریت مقادیر خالی
 for col in ["Start Date", "End Date"]:
     if col in df.columns:
         df[col] = pd.to_datetime(df[col], errors='coerce')
 
-# پر کردن ستون‌های احتمالا خالی
 for col in ["Status", "Plan"]:
     if col in df.columns:
         df[col] = df[col].fillna("")
@@ -37,10 +35,8 @@ if "Duration (days)" in df.columns:
 if "Physical Progress" in df.columns:
     df["Physical Progress"] = pd.to_numeric(df["Physical Progress"], errors='coerce').fillna(0).astype(int)
 
-# افزودن ستون Edit به ابتدای df
 df.insert(0, "Edit", "✏️")
 
-# آماده‌سازی AgGrid
 gb = GridOptionsBuilder.from_dataframe(df)
 gb.configure_selection('single')
 gb.configure_column("Edit", editable=False, cellRenderer='''function(params) {
@@ -62,7 +58,10 @@ grid_response = AgGrid(
 selected_rows = grid_response['selected_rows']
 if selected_rows:
     selected_row = selected_rows[0]
-    row_index = selected_row['_selectedRowNodeInfo']['nodeRowIndex']
+    row_index = selected_row.get('_selectedRowNodeInfo', {}).get('nodeRowIndex', None)
+    if row_index is None:
+        st.error("⚠️ Couldn't find row index!")
+        st.stop()
 
     with st.form("edit_form"):
         st.markdown("### ✏️ Edit Activity")
@@ -131,11 +130,9 @@ if selected_rows:
             df.at[row_index, "Physical Progress"] = new_progress
             df.at[row_index, "Plan"] = new_plan
 
-            # آپدیت گوگل شیت
             rows_to_save = [df.columns.tolist()] + df.fillna("").astype(str).values.tolist()
             worksheet.clear()
             worksheet.update(rows_to_save)
 
             st.success("✅ Updated successfully!")
             st.rerun()
-
